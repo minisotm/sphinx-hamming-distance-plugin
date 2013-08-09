@@ -12,7 +12,7 @@
 //
 // Windows
 // cl /MTd /LD udfexample.c
-// CREATE FUNCTION hamdist RETURNS BIGINT SONAME 'hamdist.dll';
+// CREATE FUNCTION hamdist RETURNS INT SONAME 'hamdist.dll';
 // CREATE FUNCTION hamdist_mv RETURNS INT SONAME 'hamdist.dll';
 //
 
@@ -33,18 +33,19 @@ DLLEXPORT int hamdist_ver ()
         return SPH_UDF_VERSION;
 }
 
-unsigned hamdist_fn(unsigned x, unsigned y)
+long long hamdist_fn(sphinx_uint64_t x, sphinx_uint64_t y)
 {
-  	unsigned dist = 0, val = x ^ y; // XOR
+        long long dist = 0;
+        sphinx_uint64_t val = x ^ y; // XOR
  
-  	// Count the number of set bits
-  	while(val)
-  	{
-    		++dist; 
-    		val &= val - 1;
-  	}
+        // Count the number of set bits
+        while(val)
+        {
+            ++dist; 
+            val &= val - 1;
+        }
  
-  	return dist;
+        return dist;
 }
 
 DLLEXPORT int hamdist_init ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_message )
@@ -58,8 +59,8 @@ DLLEXPORT int hamdist_init ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * er
 
         // check argument type
         if ( args->arg_types[0]!=SPH_UDF_TYPE_UINT32 && args->arg_types[1]!=SPH_UDF_TYPE_UINT32
-			&& args->arg_types[0]!=SPH_UDF_TYPE_INT64 && args->arg_types[1]!=SPH_UDF_TYPE_INT64)
-		{
+            && args->arg_types[0]!=SPH_UDF_TYPE_INT64 && args->arg_types[1]!=SPH_UDF_TYPE_INT64)
+        {
                 snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST() requires argument to be uint or int64" );
                 return 1;
         }
@@ -88,7 +89,7 @@ DLLEXPORT void hamdist_deinit ( SPH_UDF_INIT * init )
 
 DLLEXPORT sphinx_uint64_t hamdist ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_flag )
 {
-		return hamdist_fn(*args->arg_values[0], *args->arg_values[1]);
+        return hamdist_fn(*args->arg_values[0], *args->arg_values[1]);
 }
 
 // hamdist_mv
@@ -104,16 +105,17 @@ DLLEXPORT int hamdist_mv_init ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char *
 
         // check argument type
         if ( args->arg_types[0]!=SPH_UDF_TYPE_UINT32SET && args->arg_types[0]!=SPH_UDF_TYPE_UINT64SET )
-		{
+        {
                 snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST_MV() requires 1 MVA argument" );
                 return 1;
         }
         
-        if ( args->arg_types[1]!=SPH_UDF_TYPE_UINT32 && args->arg_types[1]!=SPH_UDF_TYPE_INT64 )
-		{
+        /*if ( args->arg_types[1]!=SPH_UDF_TYPE_UINT32 && args->arg_types[1]!=SPH_UDF_TYPE_INT64 )
+        {
                 snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST_MV() requires argument 2 to be uint" );
                 return 1;
         }
+         */
         
         return 0;
 }
@@ -121,24 +123,31 @@ DLLEXPORT int hamdist_mv_init ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char *
 
 DLLEXPORT sphinx_uint64_t hamdist_mv ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_flag )
 {
-	sphinx_uint64_t * mva = (sphinx_uint64_t *) args->arg_values[0];
-	int i, n;
-	sphinx_uint64_t limit = -1, bf = 0;
-		
-	if ( args->arg_types[0]==SPH_UDF_TYPE_UINT64SET )
+        sphinx_uint64_t * mva = (sphinx_uint64_t *) args->arg_values[0];
+        
+        int i, n;
+        long long limit = -1, bf = 0;
+        
+        if ( !mva )
+        {
+            return -1;
+        }
+
+        if ( args->arg_types[0]==SPH_UDF_TYPE_UINT64SET )
         {
                 // handle mva64
                 n = *mva++ / 2;
                 for ( i=0; i<n; i++ )
                 {
+
                         bf = hamdist_fn((((sphinx_uint64_t)mva[1]) << 32) + mva[0], *args->arg_values[1]);
                         
                         if (limit == -1 || bf < limit) 
                         {
-				bf = limit;
-			}
-						
-			mva += 2; 
+                            limit = bf;
+                        }
+
+                        mva += 2; 
                 }
         } else
         {
@@ -146,16 +155,16 @@ DLLEXPORT sphinx_uint64_t hamdist_mv ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args,
                 n = *mva++;
                 for ( i=0; i<n; i++ )
                 {
-			bf = hamdist_fn(*mva++, *args->arg_values[1]);
-					
-			if (limit == -1 || bf < limit) 
-			{
-				bf = limit;
-			}
-		}
+                        bf = hamdist_fn(*mva++, *args->arg_values[1]);
+
+                        if (limit == -1 || bf < limit) 
+                        {
+                            limit = bf;
+                        }
+                }
         }
         
-        return bf;
+        return limit;
 }
 
 //
