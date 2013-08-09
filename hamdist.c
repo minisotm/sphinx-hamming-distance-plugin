@@ -12,7 +12,7 @@
 //
 // Windows
 // cl /MTd /LD udfexample.c
-// CREATE FUNCTION hamdist RETURNS INT SONAME 'hamdist.dll';
+// CREATE FUNCTION hamdist RETURNS BIGINT SONAME 'hamdist.dll';
 // CREATE FUNCTION hamdist_mv RETURNS INT SONAME 'hamdist.dll';
 //
 
@@ -35,16 +35,16 @@ DLLEXPORT int hamdist_ver ()
 
 unsigned hamdist_fn(unsigned x, unsigned y)
 {
-  unsigned dist = 0, val = x ^ y; // XOR
+  	unsigned dist = 0, val = x ^ y; // XOR
  
-  // Count the number of set bits
-  while(val)
-  {
-    ++dist; 
-    val &= val - 1;
-  }
+  	// Count the number of set bits
+  	while(val)
+  	{
+    		++dist; 
+    		val &= val - 1;
+  	}
  
-  return dist;
+  	return dist;
 }
 
 DLLEXPORT int hamdist_init ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_message )
@@ -57,9 +57,10 @@ DLLEXPORT int hamdist_init ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * er
         }
 
         // check argument type
-        if ( args->arg_types[0]!=SPH_UDF_TYPE_UINT32 && args->arg_types[1]!=SPH_UDF_TYPE_UINT32)
-  	{
-                snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST() requires argument to be uint" );
+        if ( args->arg_types[0]!=SPH_UDF_TYPE_UINT32 && args->arg_types[1]!=SPH_UDF_TYPE_UINT32
+			&& args->arg_types[0]!=SPH_UDF_TYPE_INT64 && args->arg_types[1]!=SPH_UDF_TYPE_INT64)
+		{
+                snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST() requires argument to be uint or int64" );
                 return 1;
         }
 
@@ -85,7 +86,7 @@ DLLEXPORT void hamdist_deinit ( SPH_UDF_INIT * init )
         }
 }
 
-DLLEXPORT sphinx_int64_t hamdist ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_flag )
+DLLEXPORT sphinx_uint64_t hamdist ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_flag )
 {
 		return hamdist_fn(*args->arg_values[0], *args->arg_values[1]);
 }
@@ -95,9 +96,9 @@ DLLEXPORT sphinx_int64_t hamdist ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, cha
 DLLEXPORT int hamdist_mv_init ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_message )
 {
         // check argument count
-        if ( args->arg_count != 3 )
+        if ( args->arg_count != 2 )
         {
-                snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST_MV() takes either 3 arguments" );
+                snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST_MV() takes either 2 arguments" );
                 return 1;
         }
 
@@ -108,38 +109,36 @@ DLLEXPORT int hamdist_mv_init ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char *
                 return 1;
         }
         
-        if ( args->arg_types[1]!=SPH_UDF_TYPE_UINT32 && args->arg_types[2]!=SPH_UDF_TYPE_UINT32 )
+        if ( args->arg_types[1]!=SPH_UDF_TYPE_UINT32 && args->arg_types[1]!=SPH_UDF_TYPE_INT64 )
 		{
-                snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST_MV() requires argument 2 or 3 to be uint" );
+                snprintf ( error_message, SPH_UDF_ERROR_LEN, "HAMDIST_MV() requires argument 2 to be uint" );
                 return 1;
         }
-
-        // store our mva vs mva64 flag to func_data
-        init->func_data = (void*)(int)( args->arg_types[0]==SPH_UDF_TYPE_UINT64SET ? 1 : 0 );
+        
         return 0;
 }
 
 
-DLLEXPORT sphinx_int64_t hamdist_mv ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_flag )
+DLLEXPORT sphinx_uint64_t hamdist_mv ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, char * error_flag )
 {
-		unsigned int * mva = (unsigned int *) args->arg_values[0];
-		int i, n, limit, is64;
+	sphinx_uint64_t * mva = (sphinx_uint64_t *) args->arg_values[0];
+	int i, n;
+	sphinx_uint64_t limit = -1, bf = 0;
 		
-		is64 = (int)(init->func_data) != 0;
-		limit = *args->arg_values[2];
-		
-		if ( is64 )
+	if ( args->arg_types[0]==SPH_UDF_TYPE_UINT64SET )
         {
                 // handle mva64
                 n = *mva++ / 2;
                 for ( i=0; i<n; i++ )
                 {
-                        if ( hamdist_fn((((sphinx_uint64_t)mva[1]) << 32) + mva[0], *args->arg_values[1]) < limit ) 
+                        bf = hamdist_fn((((sphinx_uint64_t)mva[1]) << 32) + mva[0], *args->arg_values[1]);
+                        
+                        if (limit == -1 || bf < limit) 
                         {
-							return 1;
-						}
+				bf = limit;
+			}
 						
-						mva += 2; 
+			mva += 2; 
                 }
         } else
         {
@@ -147,14 +146,16 @@ DLLEXPORT sphinx_int64_t hamdist_mv ( SPH_UDF_INIT * init, SPH_UDF_ARGS * args, 
                 n = *mva++;
                 for ( i=0; i<n; i++ )
                 {
-					if ( hamdist_fn(*mva++, *args->arg_values[1]) < limit) 
-					{
-						return 1;
-					}
-				}
+			bf = hamdist_fn(*mva++, *args->arg_values[1]);
+					
+			if (limit == -1 || bf < limit) 
+			{
+				bf = limit;
+			}
+		}
         }
         
-        return 0;
+        return bf;
 }
 
 //
